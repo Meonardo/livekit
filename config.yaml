@@ -122,7 +122,7 @@ keys:
 # Logging config
 logging:
 #   # log level, valid values: debug, info, warn, error
-  level: debug
+  level: info
 #   # log level for pion, default error
   pion_level: error
 #   # when set to true, emit json fields

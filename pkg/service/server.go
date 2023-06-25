@@ -112,6 +112,11 @@ func NewLivekitServer(conf *config.Config,
 	mux.HandleFunc("/rtc/validate", rtcService.Validate)
 	mux.HandleFunc("/", s.defaultHandler)
 
+	// campus service
+	campusService := NewCampusService(conf, router, currentNode)
+	mux.Handle("/campus", campusService)
+	mux.HandleFunc("/campus/requestToken", campusService.RequestToken)
+
 	s.httpServer = &http.Server{
 		Handler: configureMiddlewares(mux, middlewares...),
 	}
