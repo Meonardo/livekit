@@ -199,7 +199,7 @@ func getConfig(c *cli.Context) (*config.Config, error) {
 		if len(conf.Keys) == 0 {
 			logger.Infow("no keys provided, using placeholder keys",
 				"API Key", "devkey",
-				"API Secret", "secret",
+				"API Secret", "secret@1234567890abcdefghij@1234567890abcdefghij@1234567890abcdefghij",
 			)
 			conf.Keys = map[string]string{
 				"devkey": "secret",
