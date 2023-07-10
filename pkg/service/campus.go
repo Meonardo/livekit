@@ -80,7 +80,7 @@ func (s *CampusService) RequestToken(w http.ResponseWriter, r *http.Request) {
 	if len(userName) == 0 { // user identity if username is empty
 		userName = request.Identity
 	}
-	at.AddGrant(grant).SetIdentity(request.Identity).SetValidFor(time.Hour).SetName(userName)
+	at.AddGrant(grant).SetIdentity(request.Identity).SetValidFor(time.Hour * 24).SetName(userName)
 
 	token, err := at.ToJWT()
 	if err != nil {
