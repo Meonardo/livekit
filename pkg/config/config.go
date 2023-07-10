@@ -105,12 +105,31 @@ type PLIThrottleConfig struct {
 	HighQuality time.Duration `yaml:"high_quality,omitempty"`
 }
 
+type CongestionControlProbeConfig struct {
+	BaseInterval  time.Duration `yaml:"base_interval,omitempty"`
+	BackoffFactor float64       `yaml:"backoff_factor,omitempty"`
+	MaxInterval   time.Duration `yaml:"max_interval,omitempty"`
+
+	SettleWait    time.Duration `yaml:"settle_wait,omitempty"`
+	SettleWaitMax time.Duration `yaml:"settle_wait_max,omitempty"`
+
+	TrendWait time.Duration `yaml:"trend_wait,omitempty"`
+
+	OveragePct             int64         `yaml:"overage_pct,omitempty"`
+	MinBps                 int64         `yaml:"min_bps,omitempty"`
+	MinDuration            time.Duration `yaml:"min_duration,omitempty"`
+	MaxDuration            time.Duration `yaml:"max_duration,omitempty"`
+	DurationOverflowFactor float64       `yaml:"duration_overflow_factor,omitempty"`
+	DurationIncreaseFactor float64       `yaml:"duration_increase_factor,omitempty"`
+}
+
 type CongestionControlConfig struct {
-	Enabled            bool                       `yaml:"enabled"`
-	AllowPause         bool                       `yaml:"allow_pause"`
-	UseSendSideBWE     bool                       `yaml:"send_side_bandwidth_estimation,omitempty"`
-	ProbeMode          CongestionControlProbeMode `yaml:"padding_mode,omitempty"`
-	MinChannelCapacity int64                      `yaml:"min_channel_capacity,omitempty"`
+	Enabled            bool                         `yaml:"enabled"`
+	AllowPause         bool                         `yaml:"allow_pause"`
+	UseSendSideBWE     bool                         `yaml:"send_side_bandwidth_estimation,omitempty"`
+	ProbeMode          CongestionControlProbeMode   `yaml:"padding_mode,omitempty"`
+	MinChannelCapacity int64                        `yaml:"min_channel_capacity,omitempty"`
+	ProbeConfig        CongestionControlProbeConfig `yaml:"probe_config,omitempty"`
 }
 
 type AudioConfig struct {
@@ -245,154 +264,172 @@ func DefaultAPIConfig() APIConfig {
 	}
 }
 
+var DefaultConfig = Config{
+	Port: 7880,
+	RTC: RTCConfig{
+		RTCConfig: rtcconfig.RTCConfig{
+			UseExternalIP:     false,
+			TCPPort:           7881,
+			UDPPort:           0,
+			ICEPortRangeStart: 0,
+			ICEPortRangeEnd:   0,
+			STUNServers:       []string{},
+		},
+		PacketBufferSize: 500,
+		StrictACKs:       true,
+		PLIThrottle: PLIThrottleConfig{
+			LowQuality:  500 * time.Millisecond,
+			MidQuality:  time.Second,
+			HighQuality: time.Second,
+		},
+		CongestionControl: CongestionControlConfig{
+			Enabled:    true,
+			AllowPause: false,
+			ProbeMode:  CongestionControlProbeModePadding,
+			ProbeConfig: CongestionControlProbeConfig{
+				BaseInterval:  3 * time.Second,
+				BackoffFactor: 1.5,
+				MaxInterval:   2 * time.Minute,
+
+				SettleWait:    250 * time.Millisecond,
+				SettleWaitMax: 10 * time.Second,
+
+				TrendWait: 2 * time.Second,
+
+				OveragePct:             120,
+				MinBps:                 200_000,
+				MinDuration:            200 * time.Millisecond,
+				MaxDuration:            20 * time.Second,
+				DurationOverflowFactor: 1.25,
+				DurationIncreaseFactor: 1.5,
+			},
+		},
+	},
+	Audio: AudioConfig{
+		ActiveLevel:     35, // -35dBov
+		MinPercentile:   40,
+		UpdateInterval:  400,
+		SmoothIntervals: 2,
+	},
+	Video: VideoConfig{
+		DynacastPauseDelay: 5 * time.Second,
+		StreamTracker: StreamTrackersConfig{
+			Video: StreamTrackerConfig{
+				StreamTrackerType: StreamTrackerTypePacket,
+				BitrateReportInterval: map[int32]time.Duration{
+					0: 1 * time.Second,
+					1: 1 * time.Second,
+					2: 1 * time.Second,
+				},
+				PacketTracker: map[int32]StreamTrackerPacketConfig{
+					0: {
+						SamplesRequired: 1,
+						CyclesRequired:  4,
+						CycleDuration:   500 * time.Millisecond,
+					},
+					1: {
+						SamplesRequired: 5,
+						CyclesRequired:  20,
+						CycleDuration:   500 * time.Millisecond,
+					},
+					2: {
+						SamplesRequired: 5,
+						CyclesRequired:  20,
+						CycleDuration:   500 * time.Millisecond,
+					},
+				},
+				FrameTracker: map[int32]StreamTrackerFrameConfig{
+					0: {
+						MinFPS: 5.0,
+					},
+					1: {
+						MinFPS: 5.0,
+					},
+					2: {
+						MinFPS: 5.0,
+					},
+				},
+			},
+			Screenshare: StreamTrackerConfig{
+				StreamTrackerType: StreamTrackerTypePacket,
+				BitrateReportInterval: map[int32]time.Duration{
+					0: 4 * time.Second,
+					1: 4 * time.Second,
+					2: 4 * time.Second,
+				},
+				PacketTracker: map[int32]StreamTrackerPacketConfig{
+					0: {
+						SamplesRequired: 1,
+						CyclesRequired:  1,
+						CycleDuration:   2 * time.Second,
+					},
+					1: {
+						SamplesRequired: 1,
+						CyclesRequired:  1,
+						CycleDuration:   2 * time.Second,
+					},
+					2: {
+						SamplesRequired: 1,
+						CyclesRequired:  1,
+						CycleDuration:   2 * time.Second,
+					},
+				},
+				FrameTracker: map[int32]StreamTrackerFrameConfig{
+					0: {
+						MinFPS: 0.5,
+					},
+					1: {
+						MinFPS: 0.5,
+					},
+					2: {
+						MinFPS: 0.5,
+					},
+				},
+			},
+		},
+	},
+	Redis: redisLiveKit.RedisConfig{},
+	Room: RoomConfig{
+		AutoCreate: true,
+		EnabledCodecs: []CodecSpec{
+			{Mime: webrtc.MimeTypeOpus},
+			{Mime: "audio/red"},
+			{Mime: webrtc.MimeTypeVP8},
+			{Mime: webrtc.MimeTypeH264},
+			// {Mime: webrtc.MimeTypeAV1},
+			// {Mime: webrtc.MimeTypeVP9},
+		},
+		EmptyTimeout: 5 * 60,
+	},
+	Logging: LoggingConfig{
+		PionLevel: "error",
+	},
+	TURN: TURNConfig{
+		Enabled: false,
+	},
+	NodeSelector: NodeSelectorConfig{
+		Kind:         "any",
+		SortBy:       "random",
+		SysloadLimit: 0.9,
+		CPULoadLimit: 0.9,
+	},
+	SignalRelay: SignalRelayConfig{
+		Enabled:          false,
+		RetryTimeout:     7500 * time.Millisecond,
+		MinRetryInterval: 500 * time.Millisecond,
+		MaxRetryInterval: 4 * time.Second,
+		StreamBufferSize: 1000,
+	},
+	Keys: map[string]string{},
+}
+
 func NewConfig(confString string, strictMode bool, c *cli.Context, baseFlags []cli.Flag) (*Config, error) {
 	// start with defaults
-	conf := &Config{
-		Port: 7880,
-		RTC: RTCConfig{
-			RTCConfig: rtcconfig.RTCConfig{
-				UseExternalIP:     false,
-				TCPPort:           7881,
-				UDPPort:           0,
-				ICEPortRangeStart: 0,
-				ICEPortRangeEnd:   0,
-				STUNServers:       []string{},
-			},
-			PacketBufferSize: 500,
-			StrictACKs:       true,
-			PLIThrottle: PLIThrottleConfig{
-				LowQuality:  500 * time.Millisecond,
-				MidQuality:  time.Second,
-				HighQuality: time.Second,
-			},
-			CongestionControl: CongestionControlConfig{
-				Enabled:    true,
-				AllowPause: false,
-				ProbeMode:  CongestionControlProbeModePadding,
-			},
-		},
-		Audio: AudioConfig{
-			ActiveLevel:     35, // -35dBov
-			MinPercentile:   40,
-			UpdateInterval:  400,
-			SmoothIntervals: 2,
-		},
-		Video: VideoConfig{
-			DynacastPauseDelay: 5 * time.Second,
-			StreamTracker: StreamTrackersConfig{
-				Video: StreamTrackerConfig{
-					StreamTrackerType: StreamTrackerTypePacket,
-					BitrateReportInterval: map[int32]time.Duration{
-						0: 1 * time.Second,
-						1: 1 * time.Second,
-						2: 1 * time.Second,
-					},
-					PacketTracker: map[int32]StreamTrackerPacketConfig{
-						0: {
-							SamplesRequired: 1,
-							CyclesRequired:  4,
-							CycleDuration:   500 * time.Millisecond,
-						},
-						1: {
-							SamplesRequired: 5,
-							CyclesRequired:  20,
-							CycleDuration:   500 * time.Millisecond,
-						},
-						2: {
-							SamplesRequired: 5,
-							CyclesRequired:  20,
-							CycleDuration:   500 * time.Millisecond,
-						},
-					},
-					FrameTracker: map[int32]StreamTrackerFrameConfig{
-						0: {
-							MinFPS: 5.0,
-						},
-						1: {
-							MinFPS: 5.0,
-						},
-						2: {
-							MinFPS: 5.0,
-						},
-					},
-				},
-				Screenshare: StreamTrackerConfig{
-					StreamTrackerType: StreamTrackerTypePacket,
-					BitrateReportInterval: map[int32]time.Duration{
-						0: 4 * time.Second,
-						1: 4 * time.Second,
-						2: 4 * time.Second,
-					},
-					PacketTracker: map[int32]StreamTrackerPacketConfig{
-						0: {
-							SamplesRequired: 1,
-							CyclesRequired:  1,
-							CycleDuration:   2 * time.Second,
-						},
-						1: {
-							SamplesRequired: 1,
-							CyclesRequired:  1,
-							CycleDuration:   2 * time.Second,
-						},
-						2: {
-							SamplesRequired: 1,
-							CyclesRequired:  1,
-							CycleDuration:   2 * time.Second,
-						},
-					},
-					FrameTracker: map[int32]StreamTrackerFrameConfig{
-						0: {
-							MinFPS: 0.5,
-						},
-						1: {
-							MinFPS: 0.5,
-						},
-						2: {
-							MinFPS: 0.5,
-						},
-					},
-				},
-			},
-		},
-		Redis: redisLiveKit.RedisConfig{},
-		Room: RoomConfig{
-			AutoCreate: true,
-			EnabledCodecs: []CodecSpec{
-				{Mime: webrtc.MimeTypeOpus},
-				{Mime: "audio/red"},
-				{Mime: webrtc.MimeTypeVP8},
-				{Mime: webrtc.MimeTypeH264},
-				// {Mime: webrtc.MimeTypeAV1},
-				// {Mime: webrtc.MimeTypeVP9},
-			},
-			EmptyTimeout: 5 * 60,
-		},
-		Logging: LoggingConfig{
-			PionLevel: "error",
-		},
-		TURN: TURNConfig{
-			Enabled: false,
-		},
-		NodeSelector: NodeSelectorConfig{
-			Kind:         "any",
-			SortBy:       "random",
-			SysloadLimit: 0.9,
-			CPULoadLimit: 0.9,
-		},
-		SignalRelay: SignalRelayConfig{
-			Enabled:          false,
-			RetryTimeout:     7500 * time.Millisecond,
-			MinRetryInterval: 500 * time.Millisecond,
-			MaxRetryInterval: 4 * time.Second,
-			StreamBufferSize: 1000,
-		},
-		Keys: map[string]string{},
-	}
-
+	conf := DefaultConfig
 	if confString != "" {
 		decoder := yaml.NewDecoder(strings.NewReader(confString))
 		decoder.KnownFields(strictMode)
-		if err := decoder.Decode(conf); err != nil {
+		if err := decoder.Decode(&conf); err != nil {
 			return nil, fmt.Errorf("could not parse config: %v", err)
 		}
 	}
@@ -437,7 +474,7 @@ func NewConfig(confString string, strictMode bool, c *cli.Context, baseFlags []c
 		conf.Environment = "dev"
 	}
 
-	return conf, nil
+	return &conf, nil
 }
 
 func (conf *Config) IsTURNSEnabled() bool {
@@ -596,6 +633,13 @@ func GenerateCLIFlags(existingFlags []cli.Flag, hidden bool) ([]cli.Flag, error)
 				Usage:   generatedCLIFlagUsage,
 				Hidden:  hidden,
 			}
+		case reflect.Float64:
+			flag = &cli.Float64Flag{
+				Name:    name,
+				EnvVars: []string{envVar},
+				Usage:   generatedCLIFlagUsage,
+				Hidden:  hidden,
+			}
 		case reflect.Slice:
 			// TODO
 			continue
@@ -646,6 +690,8 @@ func (conf *Config) updateFromCLI(c *cli.Context, baseFlags []cli.Flag) error {
 		case reflect.Uint8, reflect.Uint16, reflect.Uint32:
 			configValue.SetUint(c.Uint64(flagName))
 		case reflect.Float32:
+			configValue.SetFloat(c.Float64(flagName))
+		case reflect.Float64:
 			configValue.SetFloat(c.Float64(flagName))
 		// case reflect.Slice:
 		// 	// TODO

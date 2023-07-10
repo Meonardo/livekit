@@ -23,6 +23,7 @@ import (
 	"github.com/livekit/livekit-server/pkg/sfu"
 	"github.com/livekit/livekit-server/pkg/sfu/buffer"
 	"github.com/livekit/livekit-server/pkg/sfu/connectionquality"
+	"github.com/livekit/livekit-server/pkg/sfu/pacer"
 	"github.com/livekit/livekit-server/pkg/sfu/streamallocator"
 	"github.com/livekit/livekit-server/pkg/telemetry"
 	"github.com/livekit/livekit-server/pkg/telemetry/prometheus"
@@ -231,6 +232,10 @@ func (p *ParticipantImpl) GetAdaptiveStream() bool {
 	return p.params.AdaptiveStream
 }
 
+func (p *ParticipantImpl) GetPacer() pacer.Pacer {
+	return p.TransportManager.GetSubscriberPacer()
+}
+
 func (p *ParticipantImpl) ID() livekit.ParticipantID {
 	return p.params.SID
 }
@@ -277,6 +282,12 @@ func (p *ParticipantImpl) IsIdle() bool {
 
 func (p *ParticipantImpl) ConnectedAt() time.Time {
 	return p.connectedAt
+}
+
+func (p *ParticipantImpl) GetClientInfo() *livekit.ClientInfo {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.params.ClientInfo.ClientInfo
 }
 
 func (p *ParticipantImpl) GetClientConfiguration() *livekit.ClientConfiguration {
@@ -358,6 +369,8 @@ func (p *ParticipantImpl) SetPermission(permission *livekit.ParticipantPermissio
 		p.lock.Unlock()
 		return false
 	}
+
+	p.GetLogger().Infow("updating participant permission", "permission", permission)
 
 	video.UpdateFromPermission(permission)
 	p.dirty.Store(true)
@@ -538,6 +551,10 @@ func (p *ParticipantImpl) HandleAnswer(answer webrtc.SessionDescription) {
 }
 
 func (p *ParticipantImpl) onPublisherAnswer(answer webrtc.SessionDescription) error {
+	if p.IsClosed() || p.IsDisconnected() {
+		return nil
+	}
+
 	p.params.Logger.Debugw("sending answer", "transport", livekit.SignalTarget_PUBLISHER)
 	answer = p.configurePublisherAnswer(answer)
 	if err := p.writeMessage(&livekit.SignalResponse{
@@ -608,14 +625,13 @@ func (p *ParticipantImpl) removeMutedTrackNotFired(mt *MediaTrack) {
 // AddTrack is called when client intends to publish track.
 // records track details and lets client know it's ok to proceed
 func (p *ParticipantImpl) AddTrack(req *livekit.AddTrackRequest) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	if !p.grants.Video.GetCanPublishSource(req.Source) {
+	if !p.CanPublishSource(req.Source) {
 		p.params.Logger.Warnw("no permission to publish track", nil)
 		return
 	}
 
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	ti := p.addPendingTrackLocked(req)
 	if ti == nil {
 		return
@@ -1290,7 +1306,7 @@ func (p *ParticipantImpl) onDataMessage(kind livekit.DataPacket_Kind, data []byt
 }
 
 func (p *ParticipantImpl) onICECandidate(c *webrtc.ICECandidate, target livekit.SignalTarget) error {
-	if c == nil || p.IsDisconnected() {
+	if c == nil || p.IsDisconnected() || p.IsClosed() {
 		return nil
 	}
 
@@ -1693,6 +1709,24 @@ func (p *ParticipantImpl) addMigrateMutedTrack(cid string, ti *livekit.TrackInfo
 		for _, nc := range parameters.Codecs {
 			if strings.EqualFold(nc.MimeType, c.MimeType) {
 				potentialCodecs = append(potentialCodecs, nc)
+				break
+			}
+		}
+	}
+	// check for mime_type for tracks that do not have simulcast_codecs set
+	if ti.MimeType != "" {
+		for _, nc := range parameters.Codecs {
+			if strings.EqualFold(nc.MimeType, ti.MimeType) {
+				alreadyAdded := false
+				for _, pc := range potentialCodecs {
+					if strings.EqualFold(pc.MimeType, ti.MimeType) {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					potentialCodecs = append(potentialCodecs, nc)
+				}
 				break
 			}
 		}

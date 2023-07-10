@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/livekit/livekit-server/pkg/routing"
 	"github.com/livekit/livekit-server/pkg/rtc"
 	"github.com/livekit/protocol/livekit"
+	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/rpc"
 )
 
@@ -125,6 +127,11 @@ func (s *RoomService) DeleteRoom(ctx context.Context, req *livekit.DeleteRoomReq
 	if err := EnsureCreatePermission(ctx); err != nil {
 		return nil, twirpAuthError(err)
 	}
+
+	if _, _, err := s.roomStore.LoadRoom(ctx, livekit.RoomName(req.Room), false); err == ErrRoomNotFound {
+		return nil, twirp.NotFoundError("room not found")
+	}
+
 	err := s.router.WriteRoomRTC(ctx, livekit.RoomName(req.Room), &livekit.RTCNodeMessage{
 		Message: &livekit.RTCNodeMessage_DeleteRoom{
 			DeleteRoom: req,
@@ -185,6 +192,11 @@ func (s *RoomService) GetParticipant(ctx context.Context, req *livekit.RoomParti
 
 func (s *RoomService) RemoveParticipant(ctx context.Context, req *livekit.RoomParticipantIdentity) (*livekit.RemoveParticipantResponse, error) {
 	AppendLogFields(ctx, "room", req.Room, "participant", req.Identity)
+
+	if _, err := s.roomStore.LoadParticipant(ctx, livekit.RoomName(req.Room), livekit.ParticipantIdentity(req.Identity)); err == ErrParticipantNotFound {
+		return nil, twirp.NotFoundError("participant not found")
+	}
+
 	err := s.writeParticipantMessage(ctx, livekit.RoomName(req.Room), livekit.ParticipantIdentity(req.Identity), &livekit.RTCNodeMessage{
 		Message: &livekit.RTCNodeMessage_RemoveParticipant{
 			RemoveParticipant: req,
@@ -273,20 +285,24 @@ func (s *RoomService) UpdateParticipant(ctx context.Context, req *livekit.Update
 	}
 
 	var participant *livekit.ParticipantInfo
+	var detailedError error
 	err = s.confirmExecution(func() error {
 		participant, err = s.roomStore.LoadParticipant(ctx, livekit.RoomName(req.Room), livekit.ParticipantIdentity(req.Identity))
 		if err != nil {
 			return err
 		}
 		if req.Metadata != "" && participant.Metadata != req.Metadata {
+			detailedError = fmt.Errorf("metadata does not match")
 			return ErrOperationFailed
 		}
 		if req.Permission != nil && !proto.Equal(req.Permission, participant.Permission) {
+			detailedError = fmt.Errorf("permissions do not match, expected: %v, actual: %v", req.Permission, participant.Permission)
 			return ErrOperationFailed
 		}
 		return nil
 	})
 	if err != nil {
+		logger.Warnw("could not confirm participant update", detailedError)
 		return nil, err
 	}
 

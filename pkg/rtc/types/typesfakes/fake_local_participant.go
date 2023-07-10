@@ -9,6 +9,7 @@ import (
 	"github.com/livekit/livekit-server/pkg/rtc/types"
 	"github.com/livekit/livekit-server/pkg/sfu"
 	"github.com/livekit/livekit-server/pkg/sfu/buffer"
+	"github.com/livekit/livekit-server/pkg/sfu/pacer"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
@@ -212,6 +213,16 @@ type FakeLocalParticipant struct {
 	getClientConfigurationReturnsOnCall map[int]struct {
 		result1 *livekit.ClientConfiguration
 	}
+	GetClientInfoStub        func() *livekit.ClientInfo
+	getClientInfoMutex       sync.RWMutex
+	getClientInfoArgsForCall []struct {
+	}
+	getClientInfoReturns struct {
+		result1 *livekit.ClientInfo
+	}
+	getClientInfoReturnsOnCall map[int]struct {
+		result1 *livekit.ClientInfo
+	}
 	GetConnectionQualityStub        func() *livekit.ConnectionQualityInfo
 	getConnectionQualityMutex       sync.RWMutex
 	getConnectionQualityArgsForCall []struct {
@@ -241,6 +252,16 @@ type FakeLocalParticipant struct {
 	}
 	getLoggerReturnsOnCall map[int]struct {
 		result1 logger.Logger
+	}
+	GetPacerStub        func() pacer.Pacer
+	getPacerMutex       sync.RWMutex
+	getPacerArgsForCall []struct {
+	}
+	getPacerReturns struct {
+		result1 pacer.Pacer
+	}
+	getPacerReturnsOnCall map[int]struct {
+		result1 pacer.Pacer
 	}
 	GetPublishedTrackStub        func(livekit.TrackID) types.MediaTrack
 	getPublishedTrackMutex       sync.RWMutex
@@ -1849,6 +1870,59 @@ func (fake *FakeLocalParticipant) GetClientConfigurationReturnsOnCall(i int, res
 	}{result1}
 }
 
+func (fake *FakeLocalParticipant) GetClientInfo() *livekit.ClientInfo {
+	fake.getClientInfoMutex.Lock()
+	ret, specificReturn := fake.getClientInfoReturnsOnCall[len(fake.getClientInfoArgsForCall)]
+	fake.getClientInfoArgsForCall = append(fake.getClientInfoArgsForCall, struct {
+	}{})
+	stub := fake.GetClientInfoStub
+	fakeReturns := fake.getClientInfoReturns
+	fake.recordInvocation("GetClientInfo", []interface{}{})
+	fake.getClientInfoMutex.Unlock()
+	if stub != nil {
+		return stub()
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeLocalParticipant) GetClientInfoCallCount() int {
+	fake.getClientInfoMutex.RLock()
+	defer fake.getClientInfoMutex.RUnlock()
+	return len(fake.getClientInfoArgsForCall)
+}
+
+func (fake *FakeLocalParticipant) GetClientInfoCalls(stub func() *livekit.ClientInfo) {
+	fake.getClientInfoMutex.Lock()
+	defer fake.getClientInfoMutex.Unlock()
+	fake.GetClientInfoStub = stub
+}
+
+func (fake *FakeLocalParticipant) GetClientInfoReturns(result1 *livekit.ClientInfo) {
+	fake.getClientInfoMutex.Lock()
+	defer fake.getClientInfoMutex.Unlock()
+	fake.GetClientInfoStub = nil
+	fake.getClientInfoReturns = struct {
+		result1 *livekit.ClientInfo
+	}{result1}
+}
+
+func (fake *FakeLocalParticipant) GetClientInfoReturnsOnCall(i int, result1 *livekit.ClientInfo) {
+	fake.getClientInfoMutex.Lock()
+	defer fake.getClientInfoMutex.Unlock()
+	fake.GetClientInfoStub = nil
+	if fake.getClientInfoReturnsOnCall == nil {
+		fake.getClientInfoReturnsOnCall = make(map[int]struct {
+			result1 *livekit.ClientInfo
+		})
+	}
+	fake.getClientInfoReturnsOnCall[i] = struct {
+		result1 *livekit.ClientInfo
+	}{result1}
+}
+
 func (fake *FakeLocalParticipant) GetConnectionQuality() *livekit.ConnectionQualityInfo {
 	fake.getConnectionQualityMutex.Lock()
 	ret, specificReturn := fake.getConnectionQualityReturnsOnCall[len(fake.getConnectionQualityArgsForCall)]
@@ -2005,6 +2079,59 @@ func (fake *FakeLocalParticipant) GetLoggerReturnsOnCall(i int, result1 logger.L
 	}
 	fake.getLoggerReturnsOnCall[i] = struct {
 		result1 logger.Logger
+	}{result1}
+}
+
+func (fake *FakeLocalParticipant) GetPacer() pacer.Pacer {
+	fake.getPacerMutex.Lock()
+	ret, specificReturn := fake.getPacerReturnsOnCall[len(fake.getPacerArgsForCall)]
+	fake.getPacerArgsForCall = append(fake.getPacerArgsForCall, struct {
+	}{})
+	stub := fake.GetPacerStub
+	fakeReturns := fake.getPacerReturns
+	fake.recordInvocation("GetPacer", []interface{}{})
+	fake.getPacerMutex.Unlock()
+	if stub != nil {
+		return stub()
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeLocalParticipant) GetPacerCallCount() int {
+	fake.getPacerMutex.RLock()
+	defer fake.getPacerMutex.RUnlock()
+	return len(fake.getPacerArgsForCall)
+}
+
+func (fake *FakeLocalParticipant) GetPacerCalls(stub func() pacer.Pacer) {
+	fake.getPacerMutex.Lock()
+	defer fake.getPacerMutex.Unlock()
+	fake.GetPacerStub = stub
+}
+
+func (fake *FakeLocalParticipant) GetPacerReturns(result1 pacer.Pacer) {
+	fake.getPacerMutex.Lock()
+	defer fake.getPacerMutex.Unlock()
+	fake.GetPacerStub = nil
+	fake.getPacerReturns = struct {
+		result1 pacer.Pacer
+	}{result1}
+}
+
+func (fake *FakeLocalParticipant) GetPacerReturnsOnCall(i int, result1 pacer.Pacer) {
+	fake.getPacerMutex.Lock()
+	defer fake.getPacerMutex.Unlock()
+	fake.GetPacerStub = nil
+	if fake.getPacerReturnsOnCall == nil {
+		fake.getPacerReturnsOnCall = make(map[int]struct {
+			result1 pacer.Pacer
+		})
+	}
+	fake.getPacerReturnsOnCall[i] = struct {
+		result1 pacer.Pacer
 	}{result1}
 }
 
@@ -5475,12 +5602,16 @@ func (fake *FakeLocalParticipant) Invocations() map[string][][]interface{} {
 	defer fake.getCachedDownTrackMutex.RUnlock()
 	fake.getClientConfigurationMutex.RLock()
 	defer fake.getClientConfigurationMutex.RUnlock()
+	fake.getClientInfoMutex.RLock()
+	defer fake.getClientInfoMutex.RUnlock()
 	fake.getConnectionQualityMutex.RLock()
 	defer fake.getConnectionQualityMutex.RUnlock()
 	fake.getICEConnectionTypeMutex.RLock()
 	defer fake.getICEConnectionTypeMutex.RUnlock()
 	fake.getLoggerMutex.RLock()
 	defer fake.getLoggerMutex.RUnlock()
+	fake.getPacerMutex.RLock()
+	defer fake.getPacerMutex.RUnlock()
 	fake.getPublishedTrackMutex.RLock()
 	defer fake.getPublishedTrackMutex.RUnlock()
 	fake.getPublishedTracksMutex.RLock()
