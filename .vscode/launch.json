@@ -13,7 +13,9 @@
                 "--config",
                 "${workspaceFolder}\\config.yaml",
                 "--bind",
-                "0.0.0.0"
+                "0.0.0.0",
+                "--redis-host",
+                "192.168.99.64:6379"
             ],
             // "args": ["--dev", "--bind", "0.0.0.0"],
             "program": "${workspaceFolder}\\cmd\\server"

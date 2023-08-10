@@ -21,6 +21,11 @@ import (
 	"github.com/livekit/livekit-server/pkg/routing"
 	"github.com/livekit/livekit-server/pkg/service"
 	"github.com/livekit/livekit-server/version"
+
+	"C"
+	"strings"
+
+	"golang.org/x/sys/windows"
 )
 
 var baseFlags = []cli.Flag{
@@ -296,4 +301,94 @@ func getConfigString(configFile string, inConfigBody string) (string, error) {
 	}
 
 	return string(outConfigBody), nil
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+/// export functions to C
+
+var internalServer *service.LivekitServer = nil
+
+// Start server
+//
+//export Start
+func Start(config *C.char, redis *C.char) int {
+	threadId := windows.GetCurrentThreadId()
+	logger.Infow("\n============== Calling StartPublishing, current thead: %d", threadId)
+
+	c := strings.Fields(C.GoString(config))
+	configFilePath := strings.Join(c, "")
+
+	r := strings.Fields(C.GoString(redis))
+	redisAddress := strings.Join(r, "")
+
+	logger.Infow("start server with config file = %s, redis: %s", configFilePath, redisAddress)
+	err := runServer(configFilePath, redisAddress)
+	if err != nil {
+		logger.Errorw("start server failed", err)
+		return -1
+	}
+
+	return 0
+}
+
+// Stop server
+//
+//export Stop
+func Stop() int {
+	if internalServer == nil {
+		logger.Infow("internalServer is nil")
+		return -1
+	}
+
+	threadId := windows.GetCurrentThreadId()
+	logger.Infow("\n============== Calling StartPublishing, current thead: %d", threadId)
+
+	logger.Infow("exit requested, shutting down")
+	internalServer.Stop(false)
+
+	return 0
+}
+
+func runServer(configFile string, redis string) error {
+	rand.Seed(time.Now().UnixNano())
+
+	confString, err := getConfigString(configFile, "")
+	if err != nil {
+		return err
+	}
+
+	strictMode := true
+	conf, err := config.NewConfig(confString, strictMode, nil, baseFlags)
+	if err != nil {
+		return err
+	}
+	config.InitLoggerFromConfig(conf.Logging)
+
+	if len(redis) > 0 {
+		conf.Redis.Address = redis
+	}
+
+	// validate API key length
+	err = conf.ValidateKeys()
+	if err != nil {
+		return err
+	}
+
+	currentNode, err := routing.NewLocalNode(conf)
+	if err != nil {
+		return err
+	}
+
+	prometheus.Init(currentNode.Id, currentNode.Type, conf.Environment)
+
+	server, err := service.InitializeServer(conf, currentNode)
+	if err != nil {
+		return err
+	}
+
+	internalServer = server
+
+	return server.Start()
 }
