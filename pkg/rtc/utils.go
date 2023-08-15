@@ -55,6 +55,8 @@ func StreamFromTrackSource(source livekit.TrackSource) string {
 		return "screen"
 	case livekit.TrackSource_CAMERA:
 		return "camera"
+	case livekit.TrackSource_RTSP_CAMERA:
+		return "camera"
 	case livekit.TrackSource_MICROPHONE:
 		return "camera"
 	}

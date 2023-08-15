@@ -45,7 +45,7 @@ require (
 	github.com/urfave/cli/v2 v2.25.7
 	github.com/urfave/negroni/v3 v3.0.0
 	go.uber.org/atomic v1.11.0
-	golang.org/x/exp v0.0.0-20230810033253-352e893a4cad
+	golang.org/x/exp v0.0.0-20230811145659-89c5cff77bcb
 	golang.org/x/sync v0.3.0
 	google.golang.org/protobuf v1.31.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -92,8 +92,8 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
-	go.uber.org/multierr v1.6.0 // indirect
-	go.uber.org/zap v1.24.0 // indirect
+	go.uber.org/multierr v1.10.0 // indirect
+	go.uber.org/zap v1.25.0 // indirect
 	golang.org/x/crypto v0.11.0 // indirect
 	golang.org/x/mod v0.11.0 // indirect
 	golang.org/x/net v0.13.0 // indirect
@@ -106,3 +106,5 @@ require (
 )
 
 replace github.com/pion/webrtc/v3 => github.com/Meonardo/webrtc-go/v3 v3.0.0
+
+replace github.com/livekit/protocol => github.com/Meonardo/livekit-protocol v1.0.2

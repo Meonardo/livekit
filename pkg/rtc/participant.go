@@ -2018,6 +2018,8 @@ func (p *ParticipantImpl) setStableTrackID(cid string, info *livekit.TrackInfo) 
 			trackPrefix += "S"
 		case livekit.TrackSource_SCREEN_SHARE_AUDIO:
 			trackPrefix += "s"
+		case livekit.TrackSource_RTSP_CAMERA:
+			trackPrefix += "R"
 		}
 		trackID = utils.NewGuid(trackPrefix)
 	}
