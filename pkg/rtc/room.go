@@ -1,3 +1,17 @@
+// Copyright 2023 LiveKit, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package rtc
 
 import (
@@ -13,9 +27,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/livekit-server/pkg/sfu/connectionquality"
+	sutils "github.com/livekit/livekit-server/pkg/utils"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/utils"
+	"github.com/livekit/psrpc"
 
 	"github.com/livekit/livekit-server/pkg/config"
 	"github.com/livekit/livekit-server/pkg/routing"
@@ -77,6 +93,8 @@ type Room struct {
 	leftAt atomic.Int64
 	closed chan struct{}
 
+	trailer []byte
+
 	onParticipantChanged func(p types.LocalParticipant)
 	onRoomUpdated        func()
 	onClose              func()
@@ -96,9 +114,13 @@ func NewRoom(
 	egressLauncher EgressLauncher,
 ) *Room {
 	r := &Room{
-		protoRoom:                 proto.Clone(room).(*livekit.Room),
-		internal:                  internal,
-		Logger:                    LoggerWithRoom(logger.GetLogger(), livekit.RoomName(room.Name), livekit.RoomID(room.Sid)),
+		protoRoom: proto.Clone(room).(*livekit.Room),
+		internal:  internal,
+		Logger: LoggerWithRoom(
+			logger.GetLogger().WithComponent(sutils.ComponentRoom),
+			livekit.RoomName(room.Name),
+			livekit.RoomID(room.Sid),
+		),
 		config:                    config,
 		audioConfig:               audioConfig,
 		telemetry:                 telemetry,
@@ -111,6 +133,7 @@ func NewRoom(
 		bufferFactory:             buffer.NewFactoryOfBufferFactory(config.Receiver.PacketBufferSize),
 		batchedUpdates:            make(map[livekit.ParticipantIdentity]*livekit.ParticipantInfo),
 		closed:                    make(chan struct{}),
+		trailer:                   []byte(utils.RandomSecret()),
 	}
 	r.protoProxy = utils.NewProtoProxy[*livekit.Room](roomUpdateInterval, r.updateProto)
 	if r.protoRoom.EmptyTimeout == 0 {
@@ -137,6 +160,15 @@ func (r *Room) Name() livekit.RoomName {
 
 func (r *Room) ID() livekit.RoomID {
 	return livekit.RoomID(r.protoRoom.Sid)
+}
+
+func (r *Room) Trailer() []byte {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+
+	trailer := make([]byte, len(r.trailer))
+	copy(trailer, r.trailer)
+	return trailer
 }
 
 func (r *Room) GetParticipant(identity livekit.ParticipantIdentity) types.LocalParticipant {
@@ -821,6 +853,7 @@ func (r *Room) createJoinResponseLocked(participant types.LocalParticipant, iceS
 		ServerInfo:    r.serverInfo,
 		ServerVersion: r.serverInfo.Version,
 		ServerRegion:  r.serverInfo.Region,
+		SifTrailer:    r.trailer,
 	}
 }
 
@@ -828,7 +861,6 @@ func (r *Room) createJoinResponseLocked(participant types.LocalParticipant, iceS
 func (r *Room) onTrackPublished(participant types.LocalParticipant, track types.MediaTrack) {
 	// publish participant update, since track state is changed
 	r.broadcastParticipantState(participant, broadcastOptions{skipSource: true})
-	r.protoProxy.MarkDirty(false)
 
 	r.lock.RLock()
 	// subscribe all existing participants to this MediaTrack
@@ -888,7 +920,6 @@ func (r *Room) onTrackUpdated(p types.LocalParticipant, _ types.MediaTrack) {
 
 func (r *Room) onTrackUnpublished(p types.LocalParticipant, track types.MediaTrack) {
 	r.trackManager.RemoveTrack(track)
-	r.protoProxy.MarkDirty(false)
 	if !p.IsClosed() {
 		r.broadcastParticipantState(p, broadcastOptions{skipSource: true})
 	}
@@ -898,6 +929,7 @@ func (r *Room) onTrackUnpublished(p types.LocalParticipant, track types.MediaTra
 }
 
 func (r *Room) onParticipantUpdate(p types.LocalParticipant) {
+	r.protoProxy.MarkDirty(false)
 	// immediately notify when permissions or metadata changed
 	r.broadcastParticipantState(p, broadcastOptions{immediate: true})
 	if r.onParticipantChanged != nil {
@@ -1284,7 +1316,7 @@ func BroadcastDataPacketForRoom(r types.Room, source types.LocalParticipant, dp 
 
 	utils.ParallelExec(destParticipants, dataForwardLoadBalanceThreshold, 1, func(op types.LocalParticipant) {
 		err := op.SendDataPacket(dp, dpData)
-		if err != nil && !errors.Is(err, io.ErrClosedPipe) {
+		if err != nil && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, psrpc.Canceled) {
 			op.GetLogger().Infow("send data packet error", "error", err)
 		}
 	})

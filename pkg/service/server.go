@@ -1,3 +1,17 @@
+// Copyright 2023 LiveKit, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package service
 
 import (
@@ -23,6 +37,7 @@ import (
 
 	"github.com/livekit/livekit-server/pkg/config"
 	"github.com/livekit/livekit-server/pkg/routing"
+	sutils "github.com/livekit/livekit-server/pkg/utils"
 	"github.com/livekit/livekit-server/version"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
@@ -88,7 +103,7 @@ func NewLivekitServer(conf *config.Config,
 		middlewares = append(middlewares, NewAPIKeyAuthMiddleware(keyProvider))
 	}
 
-	twirpLoggingHook := TwirpLogger(logger.GetLogger())
+	twirpLoggingHook := TwirpLogger(logger.GetLogger().WithComponent(sutils.ComponentAPI))
 	twirpRequestStatusHook := TwirpRequestStatusReporter()
 	roomServer := livekit.NewRoomServiceServer(roomService, twirpLoggingHook)
 	egressServer := livekit.NewEgressServer(egressService, twirp.WithServerHooks(
@@ -230,6 +245,10 @@ func (s *LivekitServer) Start() error {
 
 	for _, promLn := range promListeners {
 		go s.promServer.Serve(promLn)
+	}
+
+	if err := s.signalServer.Start(); err != nil {
+		return err
 	}
 
 	httpGroup := &errgroup.Group{}

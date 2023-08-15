@@ -1,3 +1,17 @@
+// Copyright 2023 LiveKit, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package buffer
 
 import (
@@ -16,6 +30,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/livekit/livekit-server/pkg/sfu/audio"
+	sutils "github.com/livekit/livekit-server/pkg/utils"
 	"github.com/livekit/mediatransportutil"
 	"github.com/livekit/mediatransportutil/pkg/bucket"
 	"github.com/livekit/mediatransportutil/pkg/nack"
@@ -86,7 +101,7 @@ type Buffer struct {
 	// callbacks
 	onClose            func()
 	onRtcpFeedback     func([]rtcp.Packet)
-	onRtcpSenderReport func(*RTCPSenderReportData)
+	onRtcpSenderReport func()
 	onFpsChanged       func()
 	onFinalRtpStats    func(*RTPStats)
 
@@ -110,7 +125,7 @@ func NewBuffer(ssrc uint32, vp, ap *sync.Pool) *Buffer {
 		videoPool:   vp,
 		audioPool:   ap,
 		pliThrottle: int64(500 * time.Millisecond),
-		logger:      l,
+		logger:      l.WithComponent(sutils.ComponentPub).WithComponent(sutils.ComponentSFU),
 	}
 	b.extPackets.SetMinCapacity(7)
 	return b
@@ -120,9 +135,9 @@ func (b *Buffer) SetLogger(logger logger.Logger) {
 	b.Lock()
 	defer b.Unlock()
 
-	b.logger = logger
+	b.logger = logger.WithComponent(sutils.ComponentSFU)
 	if b.rtpStats != nil {
-		b.rtpStats.SetLogger(logger)
+		b.rtpStats.SetLogger(b.logger)
 	}
 }
 
@@ -167,7 +182,7 @@ func (b *Buffer) Bind(params webrtc.RTPParameters, codec webrtc.RTPCodecCapabili
 
 	for _, ext := range params.HeaderExtensions {
 		switch ext.URI {
-		case dd.ExtensionUrl:
+		case dd.ExtensionURI:
 			b.ddExt = uint8(ext.ID)
 			frc := NewFrameRateCalculatorDD(b.clockRate, b.logger)
 			for i := range b.frameRateCalculator {
@@ -660,7 +675,7 @@ func (b *Buffer) SetSenderReportData(rtpTime uint32, ntpTime uint64) {
 	b.RUnlock()
 
 	if b.onRtcpSenderReport != nil {
-		b.onRtcpSenderReport(srData)
+		b.onRtcpSenderReport()
 	}
 }
 
@@ -714,7 +729,7 @@ func (b *Buffer) OnRtcpFeedback(fn func(fb []rtcp.Packet)) {
 	b.onRtcpFeedback = fn
 }
 
-func (b *Buffer) OnRtcpSenderReport(fn func(srData *RTCPSenderReportData)) {
+func (b *Buffer) OnRtcpSenderReport(fn func()) {
 	b.onRtcpSenderReport = fn
 }
 

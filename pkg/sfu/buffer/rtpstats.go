@@ -1,3 +1,17 @@
+// Copyright 2023 LiveKit, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package buffer
 
 import (
@@ -22,6 +36,9 @@ const (
 	FirstSnapshotId     = 1
 	SnInfoSize          = 8192
 	SnInfoMask          = SnInfoSize - 1
+
+	firstPacketTimeAdjustWindow    = 2 * time.Minute
+	firstPacketTimeAdjustThreshold = 5 * time.Second
 )
 
 // -------------------------------------------------------
@@ -749,45 +766,71 @@ func (r *RTPStats) GetRtt() uint32 {
 	return r.rtt
 }
 
-func (r *RTPStats) SetRtcpSenderReportData(srData *RTCPSenderReportData) {
-	if srData == nil {
+func (r *RTPStats) MaybeAdjustFirstPacketTime(srData *RTCPSenderReportData) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	if srData != nil {
+		r.maybeAdjustFirstPacketTime(srData.RTPTimestamp)
+	}
+}
+
+func (r *RTPStats) maybeAdjustFirstPacketTime(ts uint32) {
+	if time.Since(r.startTime) > firstPacketTimeAdjustWindow {
 		return
 	}
 
+	// for some time after the start, adjust time of first packet.
+	// Helps improve accuracy of expected timestamp calculation.
+	// Adjusting only one way, i. e. if the first sample experienced
+	// abnormal delay (maybe due to pacing or maybe due to queuing
+	// in some network element along the way), push back first time
+	// to an earlier instance.
+	samplesDiff := int32(ts - uint32(r.extStartTS))
+	if samplesDiff < 0 {
+		// out-of-order, skip
+		return
+	}
+	samplesDuration := time.Duration(float64(samplesDiff) / float64(r.params.ClockRate) * float64(time.Second))
+	firstTime := time.Now().Add(-samplesDuration)
+	if firstTime.Before(r.firstTime) {
+		r.logger.Debugw(
+			"adjusting first packet time",
+			"before", r.firstTime.String(),
+			"after", firstTime.String(),
+		)
+		if r.firstTime.Sub(firstTime) > firstPacketTimeAdjustThreshold {
+			r.logger.Infow("first packet time adjustment too big, ignoring",
+				"adjustment", r.firstTime.Sub(firstTime),
+				"before", r.firstTime.String(),
+				"after", firstTime.String(),
+				"ts", ts,
+				"extStartTS", r.extStartTS,
+			)
+		} else {
+			r.firstTime = firstTime
+		}
+	}
+}
+
+func (r *RTPStats) SetRtcpSenderReportData(srData *RTCPSenderReportData) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
+
+	if srData == nil || !r.initialized {
+		return
+	}
 
 	// prevent against extreme case of anachronous sender reports
 	if r.srNewest != nil && r.srNewest.NTPTimestamp > srData.NTPTimestamp {
 		r.logger.Infow(
 			"received anachronous sender report",
-			"current", srData.NTPTimestamp.Time(),
-			"last", r.srNewest.NTPTimestamp.Time(),
+			"currentNTP", srData.NTPTimestamp.Time().String(),
+			"currentRTP", srData.RTPTimestamp,
+			"lastNTP", r.srNewest.NTPTimestamp.Time().String(),
+			"lastRTP", r.srNewest.RTPTimestamp,
 		)
 		return
-	}
-
-	// monitor and log RTP timestamp anomalies
-	var ntpDiffSinceLast time.Duration
-	var rtpDiffSinceLast uint32
-	var arrivalDiffSinceLast time.Duration
-	var expectedTimeDiffSinceLast float64
-	var reason string
-	if r.srNewest != nil {
-		ntpDiffSinceLast = srData.NTPTimestamp.Time().Sub(r.srNewest.NTPTimestamp.Time())
-		rtpDiffSinceLast = srData.RTPTimestamp - r.srNewest.RTPTimestamp
-		arrivalDiffSinceLast = srData.At.Sub(r.srNewest.At)
-
-		expectedTimeDiffSinceLast = float64(rtpDiffSinceLast) / float64(r.params.ClockRate)
-
-		if (srData.RTPTimestamp - r.srNewest.RTPTimestamp) > (1 << 31) {
-			reason = "received sender report, out-of-order" // should not happen, just a sanity check
-		} else {
-			if math.Abs(expectedTimeDiffSinceLast-ntpDiffSinceLast.Seconds()) > 0.2 {
-				// more than 200 ms away from expected delta
-				reason = "received sender report, time warp"
-			}
-		}
 	}
 
 	cycles := uint64(0)
@@ -800,15 +843,53 @@ func (r *RTPStats) SetRtcpSenderReportData(srData *RTCPSenderReportData) {
 
 	srDataCopy := *srData
 	srDataCopy.RTPTimestampExt = uint64(srDataCopy.RTPTimestamp) + cycles
+
+	r.maybeAdjustFirstPacketTime(srDataCopy.RTPTimestamp)
+
+	// monitor and log RTP timestamp anomalies
+	var ntpDiffSinceLast time.Duration
+	var rtpDiffSinceLast uint32
+	var arrivalDiffSinceLast time.Duration
+	var expectedTimeDiffSinceLast float64
+	var isWarped bool
+	if r.srNewest != nil {
+		if srDataCopy.RTPTimestampExt < r.srNewest.RTPTimestampExt {
+			// This can happen when a track is replaced with a null and then restored -
+			// i. e. muting replacing with null and unmute restoring the original track.
+			// Under such a condition reset the sender reports to start from this point.
+			// Resetting will ensure sample rate calculations do not go haywire due to negative time.
+			r.logger.Infow(
+				"received sender report, out-of-order, resetting",
+				"prevTSExt", r.srNewest.RTPTimestampExt,
+				"prevRTP", r.srNewest.RTPTimestamp,
+				"prevNTP", r.srNewest.NTPTimestamp.Time().String(),
+				"currTSExt", srDataCopy.RTPTimestampExt,
+				"currRTP", srDataCopy.RTPTimestamp,
+				"currNTP", srDataCopy.NTPTimestamp.Time().String(),
+			)
+			r.srFirst = &srDataCopy
+			r.srNewest = &srDataCopy
+		}
+
+		ntpDiffSinceLast = srDataCopy.NTPTimestamp.Time().Sub(r.srNewest.NTPTimestamp.Time())
+		rtpDiffSinceLast = srDataCopy.RTPTimestamp - r.srNewest.RTPTimestamp
+		arrivalDiffSinceLast = srDataCopy.At.Sub(r.srNewest.At)
+		expectedTimeDiffSinceLast = float64(rtpDiffSinceLast) / float64(r.params.ClockRate)
+		if math.Abs(expectedTimeDiffSinceLast-ntpDiffSinceLast.Seconds()) > 0.2 {
+			// more than 200 ms away from expected delta
+			isWarped = true
+		}
+	}
+
 	r.srNewest = &srDataCopy
 	if r.srFirst == nil {
 		r.srFirst = &srDataCopy
 	}
 
-	if reason != "" {
+	if isWarped {
 		packetDriftResult, reportDriftResult := r.getDrift()
 		r.logger.Infow(
-			reason,
+			"received sender report, time warp",
 			"ntp", srData.NTPTimestamp.Time().String(),
 			"rtp", srData.RTPTimestamp,
 			"arrival", srData.At.String(),
@@ -840,26 +921,22 @@ func (r *RTPStats) GetRtcpSenderReportData() (srFirst *RTCPSenderReportData, srN
 	return
 }
 
-func (r *RTPStats) GetExpectedRTPTimestamp(at time.Time) (uint32, uint64, error) {
+func (r *RTPStats) GetExpectedRTPTimestamp(at time.Time) (expectedTSExt uint64, err error) {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 
 	if !r.initialized {
-		return 0, 0, errors.New("uninitilaized")
+		err = errors.New("uninitilaized")
+		return
 	}
 
 	timeDiff := at.Sub(r.firstTime)
 	expectedRTPDiff := timeDiff.Nanoseconds() * int64(r.params.ClockRate) / 1e9
-	expectedExtRTP := r.extStartTS + uint64(expectedRTPDiff)
-
-	minTS := ^uint64(0)
-	if r.srNewest != nil {
-		minTS = r.srNewest.RTPTimestampExt
-	}
-	return uint32(expectedExtRTP), minTS, nil
+	expectedTSExt = r.extStartTS + uint64(expectedRTPDiff)
+	return
 }
 
-func (r *RTPStats) GetRtcpSenderReport(ssrc uint32, srFirst *RTCPSenderReportData, srNewest *RTCPSenderReportData) *rtcp.SenderReport {
+func (r *RTPStats) GetRtcpSenderReport(ssrc uint32, calculatedClockRate uint32) *rtcp.SenderReport {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -877,22 +954,44 @@ func (r *RTPStats) GetRtcpSenderReport(ssrc uint32, srFirst *RTCPSenderReportDat
 
 	// It is possible that publisher is pacing at a slower rate.
 	// That would make `highestTS` to be lagging the RTP time stamp in the RTCP Sender Report from publisher.
-	// Check for that and use the later time stamp if applicable.
+	// Check for that using calculated clock rate and use the later time stamp if applicable.
 	tsCycles := r.tsCycles
 	if nowRTP < r.highestTS {
 		tsCycles++
 	}
 	nowRTPExt := getExtTS(nowRTP, tsCycles)
-	if srFirst != nil && srNewest != nil && srFirst.RTPTimestamp != srNewest.RTPTimestamp {
-		// use incoming rate as a guide
-		tsf := srNewest.NTPTimestamp.Time().Sub(srFirst.NTPTimestamp.Time())
-		rdsf := srNewest.RTPTimestampExt - srFirst.RTPTimestampExt
-		sr := float64(rdsf) / tsf.Seconds()
-		nowRTPExtUsingRate := r.extStartTS + uint64(sr*timeSinceFirst.Seconds())
+	var nowRTPExtUsingRate uint64
+	if calculatedClockRate != 0 {
+		nowRTPExtUsingRate = r.extStartTS + uint64(float64(calculatedClockRate)*timeSinceFirst.Seconds())
 		if nowRTPExtUsingRate > nowRTPExt {
 			nowRTPExt = nowRTPExtUsingRate
 			nowRTP = uint32(nowRTPExtUsingRate)
 		}
+	}
+
+	if r.srNewest != nil && nowRTPExt < r.srNewest.RTPTimestampExt {
+		// If report being generated is behind, use the time difference and
+		// clock rate of codec to produce next report.
+		//
+		// Current report could be behind due to the following
+		//  - Publisher pacing
+		//  - Due to above, report from publisher side is ahead of packet timestamps.
+		//    Note that report will map wall clock to timestamp at capture time and happens before the pacer.
+		//  - Pause/Mute followed by resume, some combination of events that could
+		//    result in this module not having calculated clock rate of publisher side.
+		//  - When the above happens, current will be generated using highestTS which could be behind.
+		//    That could end up behind the last report's timestamp in extreme cases
+		r.logger.Infow(
+			"sending sender report, out-of-order, repairing",
+			"prevTSExt", r.srNewest.RTPTimestampExt,
+			"prevRTP", r.srNewest.RTPTimestamp,
+			"prevNTP", r.srNewest.NTPTimestamp.Time().String(),
+			"currTSExt", nowRTPExt,
+			"currRTP", nowRTP,
+			"currNTP", nowNTP.Time().String(),
+		)
+		ntpDiffSinceLast := nowNTP.Time().Sub(r.srNewest.NTPTimestamp.Time())
+		nowRTPExt = r.srNewest.RTPTimestampExt + uint64(ntpDiffSinceLast.Seconds()*float64(r.params.ClockRate))
 	}
 
 	// monitor and log RTP timestamp anomalies
@@ -938,6 +1037,9 @@ func (r *RTPStats) GetRtcpSenderReport(ssrc uint32, srFirst *RTCPSenderReportDat
 			"reportDrift", reportDriftResult.String(),
 			"highestTS", r.highestTS,
 			"highestTime", r.highestTime.String(),
+			"calculatedClockRate", calculatedClockRate,
+			"nowRTPExt", nowRTPExt,
+			"nowRTPExtUsingRate", nowRTPExtUsingRate,
 		)
 	}
 
