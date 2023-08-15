@@ -38,8 +38,6 @@ import (
 
 	"C"
 	"strings"
-
-	"golang.org/x/sys/windows"
 )
 
 var baseFlags = []cli.Flag{
@@ -328,9 +326,6 @@ var internalServer *service.LivekitServer = nil
 //
 //export Start
 func Start(config *C.char, redis *C.char) int {
-	threadId := windows.GetCurrentThreadId()
-	logger.Infow("\n============== Calling StartPublishing, current thead: %d", threadId)
-
 	c := strings.Fields(C.GoString(config))
 	configFilePath := strings.Join(c, "")
 
@@ -356,9 +351,6 @@ func Stop() int {
 		return -1
 	}
 
-	threadId := windows.GetCurrentThreadId()
-	logger.Infow("\n============== Calling StartPublishing, current thead: %d", threadId)
-
 	logger.Infow("exit requested, shutting down")
 	internalServer.Stop(false)
 
@@ -378,7 +370,7 @@ func runServer(configFile string, redis string) error {
 	if err != nil {
 		return err
 	}
-	config.InitLoggerFromConfig(conf.Logging)
+	config.InitLoggerFromConfig(&conf.Logging)
 
 	if len(redis) > 0 {
 		conf.Redis.Address = redis

@@ -27,3 +27,4 @@ proto/
 .idea/
 
 dist/
+cmd/server/__debug*
