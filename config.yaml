@@ -119,10 +119,11 @@ rtc:
 keys:
   devkey: secret@1234567890abcdefghij@1234567890abcdefghij@1234567890abcdefghij
   testkey: amdox@1234567890abcdefghij@1234567890abcdefghij@1234567890abcdefghij
+  amdoxkey: amdoxkey@1234567890abcdefghij@1234567890abcdefghij@1234567890abcdefghij
 # Logging config
 logging:
 #   # log level, valid values: debug, info, warn, error
-  level: info
+  level: warn
 #   # log level for pion, default error
   pion_level: error
 #   # when set to true, emit json fields
