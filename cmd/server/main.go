@@ -39,6 +39,7 @@ import (
 	"C"
 	"strings"
 )
+import "encoding/base64"
 
 var baseFlags = []cli.Flag{
 	&cli.StringSliceFlag{
@@ -191,7 +192,16 @@ func main() {
 }
 
 func getConfig(c *cli.Context) (*config.Config, error) {
-	confString, err := getConfigString(c.String("config"), c.String("config-body"))
+	configBody := c.String("config-body")
+	if len(configBody) > 0 {
+		decodedBytes, err := base64.StdEncoding.DecodeString(configBody)
+		if err == nil {
+			configBody = string(decodedBytes)
+		}
+
+		configBody = strings.ReplaceAll(configBody, "\\r\\n", "\r\n")
+	}
+	confString, err := getConfigString(c.String("config"), configBody)
 	if err != nil {
 		return nil, err
 	}
