@@ -26,11 +26,11 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pion/dtls/v2 v2.2.7
-	github.com/pion/ice/v2 v2.3.11
-	github.com/pion/interceptor v0.1.17
+	github.com/pion/ice/v2 v2.3.10
+	github.com/pion/interceptor v0.1.18
 	github.com/pion/rtcp v1.2.10
 	github.com/pion/rtp v1.8.1
-	github.com/pion/sctp v1.8.7
+	github.com/pion/sctp v1.8.8
 	github.com/pion/sdp/v3 v3.0.6
 	github.com/pion/transport/v2 v2.2.3
 	github.com/pion/turn/v2 v2.1.3
@@ -104,3 +104,7 @@ require (
 	google.golang.org/grpc v1.57.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
+
+replace github.com/pion/webrtc/v3 => github.com/Meonardo/webrtc-go/v3 v3.2.17
+
+replace github.com/livekit/protocol => github.com/Meonardo/livekit-protocol v1.0.3
