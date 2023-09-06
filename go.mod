@@ -105,6 +105,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/pion/webrtc/v3 => github.com/Meonardo/webrtc-go/v3 v3.2.17
-
 replace github.com/livekit/protocol => github.com/Meonardo/livekit-protocol v1.0.3
