@@ -16,6 +16,7 @@ package rtc
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -69,11 +70,19 @@ type downTrackState struct {
 	downTrack   sfu.DownTrackState
 }
 
+// ---------------------------------------------------------------
+
 type participantUpdateInfo struct {
 	version   uint32
 	state     livekit.ParticipantInfo_State
 	updatedAt time.Time
 }
+
+func (p participantUpdateInfo) String() string {
+	return fmt.Sprintf("version: %d, state: %s, updatedAt: %s", p.version, p.state.String(), p.updatedAt.String())
+}
+
+// ---------------------------------------------------------------
 
 type ParticipantParams struct {
 	Identity                     livekit.ParticipantIdentity
@@ -1713,8 +1722,8 @@ func (p *ParticipantImpl) mediaTrackReceived(track *webrtc.TrackRemote, rtpRecei
 	ssrc := uint32(track.SSRC())
 	if p.twcc == nil {
 		p.twcc = twcc.NewTransportWideCCResponder(ssrc)
-		p.twcc.OnFeedback(func(pkt rtcp.RawPacket) {
-			p.postRtcp([]rtcp.Packet{&pkt})
+		p.twcc.OnFeedback(func(pkts []rtcp.Packet) {
+			p.postRtcp(pkts)
 		})
 	}
 	p.pendingTracksLock.Unlock()

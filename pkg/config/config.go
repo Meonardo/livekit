@@ -152,16 +152,17 @@ type CongestionControlChannelObserverConfig struct {
 }
 
 type CongestionControlConfig struct {
-	Enabled                       bool                                   `yaml:"enabled,omitempty"`
-	AllowPause                    bool                                   `yaml:"allow_pause,omitempty"`
-	NackRatioAttenuator           float64                                `yaml:"nack_ratio_attenuator,omitempty"`
-	ExpectedUsageThreshold        float64                                `yaml:"expected_usage_threshold,omitempty"`
-	UseSendSideBWE                bool                                   `yaml:"send_side_bandwidth_estimation,omitempty"`
-	ProbeMode                     CongestionControlProbeMode             `yaml:"padding_mode,omitempty"`
-	MinChannelCapacity            int64                                  `yaml:"min_channel_capacity,omitempty"`
-	ProbeConfig                   CongestionControlProbeConfig           `yaml:"probe_config,omitempty"`
-	ChannelObserverProbeConfig    CongestionControlChannelObserverConfig `yaml:"channel_observer_probe_config,omitempty"`
-	ChannelObserverNonProbeConfig CongestionControlChannelObserverConfig `yaml:"channel_observer_non_probe_config,omitempty"`
+	Enabled                          bool                                   `yaml:"enabled,omitempty"`
+	AllowPause                       bool                                   `yaml:"allow_pause,omitempty"`
+	NackRatioAttenuator              float64                                `yaml:"nack_ratio_attenuator,omitempty"`
+	ExpectedUsageThreshold           float64                                `yaml:"expected_usage_threshold,omitempty"`
+	UseSendSideBWE                   bool                                   `yaml:"send_side_bandwidth_estimation,omitempty"`
+	ProbeMode                        CongestionControlProbeMode             `yaml:"padding_mode,omitempty"`
+	MinChannelCapacity               int64                                  `yaml:"min_channel_capacity,omitempty"`
+	ProbeConfig                      CongestionControlProbeConfig           `yaml:"probe_config,omitempty"`
+	ChannelObserverProbeConfig       CongestionControlChannelObserverConfig `yaml:"channel_observer_probe_config,omitempty"`
+	ChannelObserverNonProbeConfig    CongestionControlChannelObserverConfig `yaml:"channel_observer_non_probe_config,omitempty"`
+	DisableEstimationUnmanagedTracks bool                                   `yaml:"disable_etimation_unmanaged_tracks,omitempty"`
 }
 
 type AudioConfig struct {
@@ -308,7 +309,6 @@ var DefaultConfig = Config{
 		RTCConfig: rtcconfig.RTCConfig{
 			UseExternalIP:     false,
 			TCPPort:           7881,
-			UDPPort:           0,
 			ICEPortRangeStart: 0,
 			ICEPortRangeEnd:   0,
 			STUNServers:       []string{},
@@ -802,7 +802,7 @@ func (conf *Config) updateFromCLI(c *cli.Context, baseFlags []cli.Flag) error {
 		conf.RTC.NodeIP = c.String("node-ip")
 	}
 	if c.IsSet("udp-port") {
-		conf.RTC.UDPPort = uint32(c.Int("udp-port"))
+		conf.RTC.UDPPort.UnmarshalString(c.String("udp-port"))
 	}
 	if c.IsSet("bind") {
 		conf.BindAddresses = c.StringSlice("bind")

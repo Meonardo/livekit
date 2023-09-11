@@ -532,6 +532,13 @@ func (f *Forwarder) GetReferenceLayerSpatial() int32 {
 	return f.referenceLayerSpatial
 }
 
+func (f *Forwarder) GetReferenceTimestampOffset() uint64 {
+	f.lock.RLock()
+	defer f.lock.RUnlock()
+
+	return f.refTSOffset
+}
+
 func (f *Forwarder) isDeficientLocked() bool {
 	return f.lastAllocation.IsDeficient
 }
@@ -811,7 +818,7 @@ func (f *Forwarder) ProvisionalAllocateGetCooperativeTransition(allowOvershoot b
 	if f.provisional.muted || f.provisional.pubMuted {
 		f.provisional.allocatedLayer = buffer.InvalidLayer
 		return VideoTransition{
-			From:           f.vls.GetTarget(),
+			From:           existingTargetLayer,
 			To:             f.provisional.allocatedLayer,
 			BandwidthDelta: -getBandwidthNeeded(f.provisional.Bitrates, existingTargetLayer, f.lastAllocation.BandwidthRequested),
 		}
@@ -1300,12 +1307,18 @@ func (f *Forwarder) Pause(availableLayers []int32, brs Bitrates) VideoAllocation
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
+	existingTargetLayer := f.vls.GetTarget()
+	if !existingTargetLayer.IsValid() {
+		// already paused
+		return f.lastAllocation
+	}
+
 	maxLayer := f.vls.GetMax()
 	maxSeenLayer := f.vls.GetMaxSeen()
 	optimalBandwidthNeeded := getOptimalBandwidthNeeded(f.muted, f.pubMuted, maxSeenLayer.Spatial, brs, maxLayer)
 	alloc := VideoAllocation{
 		BandwidthRequested:  0,
-		BandwidthDelta:      0 - getBandwidthNeeded(brs, f.vls.GetTarget(), f.lastAllocation.BandwidthRequested),
+		BandwidthDelta:      0 - getBandwidthNeeded(brs, existingTargetLayer, f.lastAllocation.BandwidthRequested),
 		Bitrates:            brs,
 		BandwidthNeeded:     optimalBandwidthNeeded,
 		TargetLayer:         buffer.InvalidLayer,
@@ -1510,22 +1523,23 @@ func (f *Forwarder) processSourceSwitch(extPkt *buffer.ExtPacket, layer int32) e
 		if err == nil {
 			extExpectedTS = tsExt
 		} else {
-			rtpDiff := uint64(0)
-			if !f.preStartTime.IsZero() && f.refTSOffset == 0 {
+			if !f.preStartTime.IsZero() {
 				timeSinceFirst := time.Since(f.preStartTime)
-				rtpDiff = uint64(timeSinceFirst.Nanoseconds() * int64(f.codec.ClockRate) / 1e9)
-				f.refTSOffset = f.extFirstTS + rtpDiff - extRefTS
-				f.logger.Infow(
-					"calculating refTSOffset",
-					"preStartTime", f.preStartTime.String(),
-					"extFirstTS", f.extFirstTS,
-					"timeSinceFirst", timeSinceFirst,
-					"rtpDiff", rtpDiff,
-					"extRefTS", extRefTS,
-					"refTSOffset", f.refTSOffset,
-				)
+				rtpDiff := uint64(timeSinceFirst.Nanoseconds() * int64(f.codec.ClockRate) / 1e9)
+				extExpectedTS = f.extFirstTS + rtpDiff
+				if f.refTSOffset == 0 {
+					f.refTSOffset = extExpectedTS - extRefTS
+					f.logger.Infow(
+						"calculating refTSOffset",
+						"preStartTime", f.preStartTime.String(),
+						"extFirstTS", f.extFirstTS,
+						"timeSinceFirst", timeSinceFirst,
+						"rtpDiff", rtpDiff,
+						"extRefTS", extRefTS,
+						"refTSOffset", f.refTSOffset,
+					)
+				}
 			}
-			extExpectedTS += rtpDiff
 		}
 	}
 	extRefTS += f.refTSOffset
@@ -1616,9 +1630,6 @@ func (f *Forwarder) processSourceSwitch(extPkt *buffer.ExtPacket, layer int32) e
 
 // should be called with lock held
 func (f *Forwarder) getTranslationParamsCommon(extPkt *buffer.ExtPacket, layer int32, tp *TranslationParams) (*TranslationParams, error) {
-	if tp == nil {
-		tp = &TranslationParams{}
-	}
 	if f.lastSSRC != extPkt.Packet.SSRC {
 		if err := f.processSourceSwitch(extPkt, layer); err != nil {
 			tp.shouldDrop = true
@@ -1643,7 +1654,7 @@ func (f *Forwarder) getTranslationParamsCommon(extPkt *buffer.ExtPacket, layer i
 
 // should be called with lock held
 func (f *Forwarder) getTranslationParamsAudio(extPkt *buffer.ExtPacket, layer int32) (*TranslationParams, error) {
-	return f.getTranslationParamsCommon(extPkt, layer, nil)
+	return f.getTranslationParamsCommon(extPkt, layer, &TranslationParams{})
 }
 
 // should be called with lock held
@@ -1655,7 +1666,6 @@ func (f *Forwarder) getTranslationParamsVideo(extPkt *buffer.ExtPacket, layer in
 	}
 
 	tp := &TranslationParams{}
-
 	if !f.vls.GetTarget().IsValid() {
 		// stream is paused by streamallocator
 		tp.shouldDrop = true
@@ -1744,17 +1754,21 @@ func (f *Forwarder) maybeStart() {
 	f.started = true
 	f.preStartTime = time.Now()
 
+	sequenceNumber := uint16(rand.Intn(1<<14)) + uint16(1<<15) // a random number in third quartile of sequence number space
+	timestamp := uint32(rand.Intn(1<<30)) + uint32(1<<31)      // a random number in third quartile of timestamp space
 	extPkt := &buffer.ExtPacket{
 		Packet: &rtp.Packet{
 			Header: rtp.Header{
-				SequenceNumber: uint16(rand.Intn(1<<14)) + uint16(1<<15), // a random number in third quartile of sequence number space
-				Timestamp:      uint32(rand.Intn(1<<30)) + uint32(1<<31), // a random number in third quartile of timestamp space
+				SequenceNumber: sequenceNumber,
+				Timestamp:      timestamp,
 			},
 		},
+		ExtSequenceNumber: uint64(sequenceNumber),
+		ExtTimestamp:      uint64(timestamp),
 	}
 	f.rtpMunger.SetLastSnTs(extPkt)
 
-	f.extFirstTS = uint64(extPkt.Packet.Timestamp)
+	f.extFirstTS = uint64(timestamp)
 	f.logger.Debugw(
 		"starting with dummy forwarding",
 		"sequenceNumber", extPkt.Packet.SequenceNumber,

@@ -556,7 +556,7 @@ func (r *RoomManager) rtcSessionWorker(room *rtc.Room, participant types.LocalPa
 	_ = r.refreshToken(participant)
 	tokenTicker := time.NewTicker(tokenRefreshInterval)
 	defer tokenTicker.Stop()
-	stateCheckTicker := time.NewTicker(time.Millisecond * 50)
+	stateCheckTicker := time.NewTicker(time.Millisecond * 500)
 	defer stateCheckTicker.Stop()
 	for {
 		select {
@@ -672,9 +672,10 @@ func (r *RoomManager) handleRTCMessage(ctx context.Context, roomName livekit.Roo
 	case *livekit.RTCNodeMessage_SendData:
 		pLogger.Debugw("api send data", "size", len(rm.SendData.Data))
 		up := &livekit.UserPacket{
-			Payload:         rm.SendData.Data,
-			DestinationSids: rm.SendData.DestinationSids,
-			Topic:           rm.SendData.Topic,
+			Payload:               rm.SendData.Data,
+			DestinationSids:       rm.SendData.DestinationSids,
+			DestinationIdentities: rm.SendData.DestinationIdentities,
+			Topic:                 rm.SendData.Topic,
 		}
 		room.SendDataPacket(up, rm.SendData.Kind)
 	case *livekit.RTCNodeMessage_UpdateRoomMetadata:
